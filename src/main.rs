@@ -9,12 +9,13 @@ use axum::{
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, net::SocketAddr};
+use std::process::exit;
 use axum::extract::DefaultBodyLimit;
 use tokio_util::io::StreamReader;
 use tokio::{sync::mpsc};
 use uuid::Uuid;
 use futures_util::TryStreamExt;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
+use whisper_rs::{WhisperContext};
 
 
 #[derive(Debug, Serialize, Clone)]
@@ -40,16 +41,20 @@ struct CreateJobRequest {
 struct AppState {
     job_store: DashMap<Uuid, Job>,
     job_sender: mpsc::Sender<Job>,
-    whisper_context: WhisperContext, // The loaded model
+   //whisper_context: WhisperContext, // The loaded model
 }
 
 #[tokio::main]
 async fn main() {
+
+    let model_path = get_model().await;
+
     let (tx, mut rx) = mpsc::channel::<Job>(100);
 
     let shared_state = Arc::new(AppState {
         job_store: DashMap::new(),
         job_sender: tx,
+        //whisper_context: (),
     });
 
 
@@ -161,4 +166,24 @@ async fn get_job_status(
     } else {
         StatusCode::NOT_FOUND.into_response()
     }
+}
+
+async fn get_model() -> String {
+    let model_path = std::path::Path::new("models/ggml-base.en.bin");
+    let path = std::path::Path::new("models");
+    if !path.exists() {
+        let create_models_dir = std::fs::create_dir_all(&path);
+        if create_models_dir.is_err() {
+            eprintln!("Failed to create models directory.");
+            exit(-4)
+        }
+    }
+
+    if !model_path.exists() {
+        let api = hf_hub::api::sync::Api::new().unwrap();
+        let model = api.model("ggerganov/whisper.cpp".to_string()).get("ggml-base.en.bin").unwrap();
+        std::fs::copy(model.as_path(), model_path).unwrap();
+        println!("Whisper model Downloaded successfully.");
+    }
+    model_path.to_str().unwrap().to_string()
 }

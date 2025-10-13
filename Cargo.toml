@@ -12,4 +12,5 @@ serde_json = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 dashmap = "5.5"
 futures-util = "0.3"
-whisper-rs = { version = "0.11", features = ["ffmpeg"] }
+whisper-rs = { version = "0.15.1", features = [] }
+hf-hub = "0.4.3"
