@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.7"
+axum = { version =  "0.8.6" , features = ["json", "multipart", "ws"] }
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec"] }
+tokio-util = { version = "0.7", features = ["codec", "io"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 dashmap = "5.5"
-
-# Keep this for the actual work later
-# whisper-rs = { version = "0.11", features = ["axum", "ffmpeg"] }
+futures-util = "0.3"
+whisper-rs = { version = "0.11", features = ["ffmpeg"] }

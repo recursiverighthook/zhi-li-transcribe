@@ -2,21 +2,26 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
+    extract::Multipart,
     routing::{get, post},
     Json, Router,
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, net::SocketAddr};
-use tokio::sync::mpsc;
+use axum::extract::DefaultBodyLimit;
+use tokio_util::io::StreamReader;
+use tokio::{sync::mpsc};
 use uuid::Uuid;
+use futures_util::TryStreamExt;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
+
 
 #[derive(Debug, Serialize, Clone)]
 enum JobStatus {
     Pending,
     Processing,
     Completed,
-    Failed,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -35,6 +40,7 @@ struct CreateJobRequest {
 struct AppState {
     job_store: DashMap<Uuid, Job>,
     job_sender: mpsc::Sender<Job>,
+    whisper_context: WhisperContext, // The loaded model
 }
 
 #[tokio::main]
@@ -66,7 +72,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/jobs", post(create_job))
-        .route("/jobs/:id", get(get_job_status))
+        .route("/jobs/{id}", get(get_job_status))
+        .layer(DefaultBodyLimit::disable())
         .with_state(shared_state);
 
     let addr: SocketAddr = "127.0.0.1:3000".parse().unwrap();
@@ -77,25 +84,74 @@ async fn main() {
 
 async fn create_job(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<CreateJobRequest>,
+    mut multipart: Multipart,
 ) -> impl IntoResponse {
-    let job_id = Uuid::new_v4();
-    let new_job = Job {
-        id: job_id,
-        file_path: payload.file_path,
-        status: JobStatus::Pending,
-        result: None,
-    };
-
-    state.job_store.insert(job_id, new_job.clone());
-
-    if let Err(e) = state.job_sender.send(new_job.clone()).await {
-        eprintln!("🔥 Failed to send job to worker: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to queue job").into_response();
+    let upload_dir = std::path::Path::new("./uploads");
+    if let Err(e) = tokio::fs::create_dir_all(upload_dir).await {
+        eprintln!("Failed to create upload directory: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Server storage error.").into_response();
     }
 
-    (StatusCode::ACCEPTED, Json(new_job)).into_response()
+    while let Ok(Some(mut field)) = multipart.next_field().await {
+        if let Some(original_filename) = field.file_name().map(|name| name.to_string()) {
+            let dest_path = upload_dir.join(&original_filename);
+            println!("Receiving file: {}", original_filename);
+            let file = match tokio::fs::File::create(&dest_path).await {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("🔥 Failed to create file on disk: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Could not save file.").into_response();
+                }
+            };
+
+            if let Err(e) = stream_body_to_file(&mut field, file).await {
+                eprintln!("🔥 File stream failed: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "File upload failed mid-stream.").into_response();
+            }
+
+            let file_path = match dest_path.to_str() {
+                Some(path) => path.to_string(),
+                None => {
+                    eprintln!("🔥 Invalid file path encoding.");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid file path.").into_response();
+                }
+            };
+
+            let job_id = Uuid::new_v4();
+            let new_job = Job {
+                id: job_id,
+                file_path,
+                status: JobStatus::Pending,
+                result: None,
+            };
+
+            state.job_store.insert(job_id, new_job.clone());
+
+            if state.job_sender.send(new_job.clone()).await.is_err() {
+                eprintln!("🔥 Failed to send job to worker channel.");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to queue job.").into_response();
+            }
+
+            return (StatusCode::ACCEPTED, Json(new_job)).into_response();
+        }
+    }
+
+    (StatusCode::BAD_REQUEST, "No video file found in upload.").into_response()
 }
+
+async fn stream_body_to_file(
+    field: &mut axum::extract::multipart::Field<'_>,
+    mut file: tokio::fs::File,
+) -> Result<(), std::io::Error> {
+    let body_with_io_error =
+        field.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err));
+
+    let mut field_stream = StreamReader::new(body_with_io_error);
+    tokio::io::copy(&mut field_stream, &mut file).await?;
+    Ok(())
+}
+
+
 async fn get_job_status(
     State(state): State<Arc<AppState>>,
     Path(job_id): Path<Uuid>,
