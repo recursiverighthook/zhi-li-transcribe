@@ -15,7 +15,7 @@ use tokio_util::io::StreamReader;
 use tokio::{sync::mpsc};
 use uuid::Uuid;
 use futures_util::TryStreamExt;
-use whisper_rs::{WhisperContext};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 
 #[derive(Debug, Serialize, Clone)]
@@ -41,20 +41,20 @@ struct CreateJobRequest {
 struct AppState {
     job_store: DashMap<Uuid, Job>,
     job_sender: mpsc::Sender<Job>,
-   //whisper_context: WhisperContext, // The loaded model
+   whisper_context: WhisperContext, // The loaded model
 }
 
 #[tokio::main]
 async fn main() {
 
     let model_path = get_model().await;
-
+    let whisper_context = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default()).unwrap();
     let (tx, mut rx) = mpsc::channel::<Job>(100);
 
     let shared_state = Arc::new(AppState {
         job_store: DashMap::new(),
         job_sender: tx,
-        //whisper_context: (),
+        whisper_context,
     });
 
 
@@ -64,7 +64,12 @@ async fn main() {
             println!("WORKER: Received job {}", job.id);
             worker_state.job_store.entry(job.id).and_modify(|j| j.status = JobStatus::Processing);
 
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+           let file_path = job.file_path.clone();
+            let transcription_result = tokio::task::spawn_blocking(move || {
+
+            });
+
+            // Actually do the transformation here
             let transcription_result = format!("Transcription complete for {}", job.file_path);
 
             worker_state.job_store.entry(job.id).and_modify(|j| {
@@ -104,20 +109,20 @@ async fn create_job(
             let file = match tokio::fs::File::create(&dest_path).await {
                 Ok(file) => file,
                 Err(e) => {
-                    eprintln!("🔥 Failed to create file on disk: {}", e);
+                    eprintln!("Failed to create file on disk: {}", e);
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Could not save file.").into_response();
                 }
             };
 
             if let Err(e) = stream_body_to_file(&mut field, file).await {
-                eprintln!("🔥 File stream failed: {}", e);
+                eprintln!("File stream failed: {}", e);
                 return (StatusCode::INTERNAL_SERVER_ERROR, "File upload failed mid-stream.").into_response();
             }
 
             let file_path = match dest_path.to_str() {
                 Some(path) => path.to_string(),
                 None => {
-                    eprintln!("🔥 Invalid file path encoding.");
+                    eprintln!("Invalid file path encoding.");
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid file path.").into_response();
                 }
             };
@@ -133,7 +138,7 @@ async fn create_job(
             state.job_store.insert(job_id, new_job.clone());
 
             if state.job_sender.send(new_job.clone()).await.is_err() {
-                eprintln!("🔥 Failed to send job to worker channel.");
+                eprintln!("Failed to send job to worker channel.");
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to queue job.").into_response();
             }
 
