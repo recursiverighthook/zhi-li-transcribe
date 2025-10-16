@@ -16,3 +16,4 @@ whisper-rs = { version = "0.15.1", features = [] }
 hf-hub = "0.4.3"
 symphonia = { version = "0.5.5", features = ["all-formats", "mpa", "all-codecs", "all", "opt-simd"] }
 hound = "3.5.1"
+rubato = "0.15"

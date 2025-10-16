@@ -71,13 +71,10 @@ async fn main() {
                         j.status = JobStatus::Completed; // Or a new "Failed" status
                         j.result = Some(format!("Error: {}", e));
                     });
-                    continue; // Skip to the next job
+                    continue;
                 }
             };
-
                 let transcript = audio::transcribe_wav(model_path.to_string(), wav_path.to_str().unwrap().to_string()).await;
-
-
                 worker_state.job_store.entry(job.id).and_modify(|j| {
                 j.status = JobStatus::Completed;
                 j.result = Some(transcript);
