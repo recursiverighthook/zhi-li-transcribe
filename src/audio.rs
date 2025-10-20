@@ -263,7 +263,7 @@ pub(crate) async fn transcribe_wav(model: String, wav_file: String) -> String {
 
         let line = format!("[{} - {}]: {}\n", start_timestamp, end_timestamp, text);
         file.write_all(line.as_bytes()).expect("failed to write to file");
-        transcription = line
+        transcription.push_str(line.as_str());
     }
     transcription
 }
