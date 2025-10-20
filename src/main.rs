@@ -13,12 +13,12 @@ use serde::Serialize;
 use std::{sync::Arc, net::SocketAddr};
 use std::io::{Read, Write};
 use axum::extract::DefaultBodyLimit;
+use clap::Parser;
 use tokio_util::io::StreamReader;
 use tokio::{sync::mpsc};
 use uuid::Uuid;
 use futures_util::TryStreamExt;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
-
+use audio::get_model;
 
 #[derive(Debug, Serialize, Clone)]
 enum JobStatus {
@@ -40,10 +40,21 @@ struct AppState {
     job_sender: mpsc::Sender<Job>,
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Name of the person to greet
+    #[arg(short, long, default_value_t = String::from("large"))]
+    model_size: String,
+}
+
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
 
-    let model_path = audio::get_model().await;
+
+    let model_path = get_model(args.model_size).await;
     let (tx, mut rx) = mpsc::channel::<Job>(100);
 
     let shared_state = Arc::new(AppState {

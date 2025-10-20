@@ -183,8 +183,9 @@ pub(crate) async fn convert_audio_to_wav(audio_path: &str) -> Result<PathBuf, St
     Ok(output_path)
 }
 
-pub(crate) async fn get_model() -> String {
-    let model_path = std::path::Path::new("models/ggml-large-v3.bin");
+pub(crate) async fn get_model(model_size: String) -> String {
+    let model_name = format!("models/ggml-{}-v3.bin", model_size);
+    let model_path = std::path::Path::new(&model_name);
     let path = std::path::Path::new("models");
     if !path.exists() {
         if let Err(e) = std::fs::create_dir_all(&path) {
@@ -204,7 +205,7 @@ pub(crate) async fn get_model() -> String {
 }
 
 pub(crate) async fn transcribe_wav(model: String, wav_file: String) -> String {
-    let transcription = "".to_string();
+    let mut transcription = "".to_string();
     let context_param = WhisperContextParameters::default();
 
     let ctx = WhisperContext::new_with_params(&model, context_param)
@@ -262,6 +263,7 @@ pub(crate) async fn transcribe_wav(model: String, wav_file: String) -> String {
 
         let line = format!("[{} - {}]: {}\n", start_timestamp, end_timestamp, text);
         file.write_all(line.as_bytes()).expect("failed to write to file");
+        transcription = line
     }
     transcription
 }
